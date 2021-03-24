@@ -14,8 +14,12 @@
 // To conserve gas, efficient serialization is achieved through Borsh (http://borsh.io/)
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::wee_alloc;
-use near_sdk::{env, near_bindgen};
+use near_sdk::serde::{Deserialize, Serialize};
+use near_sdk::{env, near_bindgen, AccountId, Balance, Promise};
 use std::collections::HashMap;
+use near_sdk::json_types::{U128};
+
+pub type WrappedBalance = U128;
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -28,8 +32,46 @@ pub struct Welcome {
     records: HashMap<String, String>,
 }
 
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct Operation {
+    account_id: AccountId,
+    amount: WrappedBalance,
+}
+
 #[near_bindgen]
 impl Welcome {
+
+    #[payable]
+    pub fn send(&mut self, accounts: Vec<Operation>) {
+        let tokens: u128 = near_sdk::env::attached_deposit();
+
+        let mut total: Balance = 0;
+        for account in &accounts {
+            assert!(
+                env::is_valid_account_id(account.account_id.as_bytes()),
+                "Account @{} is invalid",
+                account.account_id
+            );
+
+            let amount: Balance = account.amount.into();
+            total += amount;
+        }
+
+        assert!(
+            total <= tokens,
+            "Not enough attached tokens to run multisender (Supplied: {}. Demand: {})",
+            tokens,
+            total
+        );
+
+        for account in accounts {
+            let amount_u128: u128 = account.amount.into();
+            Promise::new(account.account_id.clone()).transfer(amount_u128);
+            env::log( format!("Sending {} yNEAR to account @{}", amount_u128, account.account_id).as_bytes());
+        }
+    }
+
     pub fn set_greeting(&mut self, message: String) {
         let account_id = env::signer_account_id();
 
